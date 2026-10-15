@@ -1,6 +1,6 @@
 {
   "name": "darkpath-server",
-  "main": "trabajador.js",
+  "main": "worker.js",
   "compatibility_date": "2026-10-15",
   "durable_objects": {
     "bindings": [
