@@ -1,0 +1,19 @@
+{
+  "name": "darkpath-server",
+  "main": "trabajador.js",
+  "compatibility_date": "2026-10-15",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DARK_PATH_ROOMS",
+        "class_name": "DarkPathRoom"
+      }
+    ]
+  },
+  "exports": {
+    "DarkPathRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
+}
