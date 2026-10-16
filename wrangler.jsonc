@@ -1,7 +1,9 @@
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "darkpath-server",
   "main": "worker.js",
-  "compatibility_date": "2026-10-15",
+  "compatibility_date": "2026-10-16",
+
   "durable_objects": {
     "bindings": [
       {
@@ -10,10 +12,15 @@
       }
     ]
   },
-  "exports": {
-    "DarkPathRoom": {
-      "type": "durable-object",
-      "storage": "sqlite"
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DarkPathRoom"]
     }
+  ],
+
+  "observability": {
+    "enabled": true
   }
 }
