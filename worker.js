@@ -21,10 +21,10 @@ export default {
       return new Response("Falta el codigo de sala", { status: 400 });
     }
 
-    const id = env.DARK_PATH_ROOMS.idFromName(room);
-    const stub = env.DARK_PATH_ROOMS.get(id);
+    const id = env.DARK_PATH_ROOMS.idFromName(room.toUpperCase());
+    const roomObject = env.DARK_PATH_ROOMS.get(id);
 
-    return stub.fetch(request);
+    return roomObject.fetch(request);
   },
 };
 
@@ -36,13 +36,22 @@ export class DarkPathRoom extends DurableObject {
   }
 
   async fetch(request) {
+    const url = new URL(request.url);
+
+    const sockets = this.ctx.getWebSockets();
+
+    // Por ahora, máximo 8 jugadores por sala.
+    if (sockets.length >= 8) {
+      return new Response("Sala llena", { status: 403 });
+    }
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
 
-    this.ctx.acceptWebSocket(server);
-
     const playerId = crypto.randomUUID();
+
+    this.ctx.acceptWebSocket(server);
 
     server.serializeAttachment({
       id: playerId,
@@ -50,12 +59,39 @@ export class DarkPathRoom extends DurableObject {
       y: 0,
       z: 0,
       rot: 0,
+      flashlight: true,
     });
 
+    // Avisar a los demás que entró un jugador.
     this.broadcast({
       type: "player_join",
       id: playerId,
-    });
+    }, server);
+
+    // Enviar al nuevo jugador los jugadores que ya estaban.
+    for (const ws of sockets) {
+      if (ws === server) continue;
+
+      const state = ws.deserializeAttachment();
+
+      if (!state) continue;
+
+      server.send(JSON.stringify({
+        type: "player_state",
+        id: state.id,
+        x: state.x,
+        y: state.y,
+        z: state.z,
+        rot: state.rot,
+        flashlight: state.flashlight,
+      }));
+    }
+
+    server.send(JSON.stringify({
+      type: "welcome",
+      id: playerId,
+      players: this.ctx.getWebSockets().length,
+    }));
 
     return new Response(null, {
       status: 101,
@@ -72,38 +108,67 @@ export class DarkPathRoom extends DurableObject {
       return;
     }
 
-    const attachment = ws.deserializeAttachment();
+    const state = ws.deserializeAttachment();
 
-    if (!attachment) return;
+    if (!state || !data.type) return;
 
     if (data.type === "state") {
-      attachment.x = Number(data.x) || 0;
-      attachment.y = Number(data.y) || 0;
-      attachment.z = Number(data.z) || 0;
-      attachment.rot = Number(data.rot) || 0;
+      state.x = Number(data.x) || 0;
+      state.y = Number(data.y) || 0;
+      state.z = Number(data.z) || 0;
+      state.rot = Number(data.rot) || 0;
 
-      ws.serializeAttachment(attachment);
+      if (typeof data.flashlight === "boolean") {
+        state.flashlight = data.flashlight;
+      }
+
+      ws.serializeAttachment(state);
 
       this.broadcast({
         type: "player_state",
-        id: attachment.id,
-        x: attachment.x,
-        y: attachment.y,
-        z: attachment.z,
-        rot: attachment.rot,
+        id: state.id,
+        x: state.x,
+        y: state.y,
+        z: state.z,
+        rot: state.rot,
+        flashlight: state.flashlight,
+      }, ws);
+
+      return;
+    }
+
+    // Eventos del juego:
+    // sonido, piedra, monstruos, muerte, etc.
+    if (data.type === "game_event") {
+      this.broadcast({
+        type: "game_event",
+        id: state.id,
+        event: data.event,
+        data: data.data ?? null,
+      }, ws);
+
+      return;
+    }
+
+    // Señalización para el futuro sistema de voz/WebRTC.
+    if (data.type === "voice_signal") {
+      this.broadcast({
+        type: "voice_signal",
+        id: state.id,
+        signal: data.signal,
       }, ws);
     }
   }
 
   webSocketClose(ws) {
-    const attachment = ws.deserializeAttachment();
+    const state = ws.deserializeAttachment();
 
-    if (attachment) {
-      this.broadcast({
-        type: "player_leave",
-        id: attachment.id,
-      }, ws);
-    }
+    if (!state) return;
+
+    this.broadcast({
+      type: "player_leave",
+      id: state.id,
+    }, ws);
   }
 
   webSocketError(ws) {
@@ -114,11 +179,13 @@ export class DarkPathRoom extends DurableObject {
     const message = JSON.stringify(data);
 
     for (const ws of this.ctx.getWebSockets()) {
-      if (ws !== except) {
-        try {
-          ws.send(message);
-        } catch {}
+      if (ws === except) continue;
+
+      try {
+        ws.send(message);
+      } catch {
+        // Ignorar conexiones que ya se cerraron.
       }
     }
   }
-  }
+          }
